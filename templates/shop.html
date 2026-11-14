@@ -81,7 +81,7 @@
     <span class="nav-logo-text">Bagel <span>Alley</span></span>
   </a>
   <a href="/" class="nav-back">← Terug naar de website</a>
-  <a href="/reserveren" class="nav-cta">Tafel reserveren</a>
+  <a href="{{ reserveer_url }}" class="nav-cta">{{ reserveer_label }}</a>
 </nav>
 <div class="page-hero">
   <div class="page-hero-inner">
@@ -177,10 +177,10 @@
   </div>
   <div class="order-cta">
     <div class="order-cta-title">Klaar om te bestellen?</div>
-    <p class="order-cta-sub">Bestellingen via onze webshop of telefonisch. Liever ter plekke? Reserveer een tafel.</p>
+    <p class="order-cta-sub">Bestellingen via onze webshop of telefonisch. Liever ter plekke? {% if online_reserveren %}Reserveer een tafel.{% else %}Reserveer een tafel via 070-514 61 16.{% endif %}</p>
     <div class="order-cta-btns">
       <a href="https://www.bagelalley.nl/online-shop" target="_blank" class="btn-purple">🛍️ Naar de webshop</a>
-      <a href="/reserveren" class="btn-ghost">📅 Tafel reserveren</a>
+      <a href="{{ reserveer_url }}" class="btn-ghost">📅 {{ reserveer_label }}</a>
     </div>
   </div>
 </div>

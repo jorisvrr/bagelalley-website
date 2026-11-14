@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script defer src="/_vercel/insights/script.js"></script>
   {% set seo_title = "Bagel Alley | Bagels, Breakfast, Lunch & High Tea in Wassenaar" %}
   {% set seo_desc = "Bagel Alley in Wassenaar: vers belegde bagels, breakfast, lunch, high tea en tapas. Ook glutenvrij & lactosevrij. Reserveer een tafel of bestel online." %}
   {% set seo_path = "/" %}
@@ -490,7 +491,7 @@
     <li><a href="#tijden">Openingstijden</a></li>
     <li><a href="#contact">Contact</a></li>
     <li><a href="/jobs" class="nav-jobs">Jobs</a></li>
-    <li><a href="/reserveren" class="nav-cta">Reserveren</a></li>
+    <li><a href="{{ reserveer_url }}" class="nav-cta">{% if online_reserveren %}Reserveren{% else %}Bel om te reserveren{% endif %}</a></li>
   </ul>
   <label for="nav-toggle" class="mobile-menu-btn" aria-label="Menu">
     <span></span><span></span><span></span>
@@ -511,7 +512,7 @@
     <h1>Elke hap<br>een <em>verhaal.</em></h1>
     <p class="hero-desc">Breakfast, Lunch, Tea &amp; Takeaway. Verse ingrediënten, Amerikaans geïnspireerd, bereid met liefde, in het hart van Wassenaar.</p>
     <div class="hero-buttons">
-      <a href="/reserveren" class="btn-purple">Tafel reserveren</a>
+      <a href="{{ reserveer_url }}" class="btn-purple">{{ reserveer_label }}</a>
       <a href="#menu" class="btn-ghost-light">Bekijk het menu</a>
     </div>
   </div>
@@ -533,13 +534,18 @@
       <span class="shortcut-link">Bekijk de kaart →</span>
     </div>
   </a>
-  <a href="/reserveren" class="shortcut-card">
+  <a href="{{ reserveer_url }}" class="shortcut-card">
     <div class="shortcut-card-bg" style="background-image:url('{{ url_for('static', filename='specials/tafel.png') }}')"></div>
     <div class="shortcut-overlay"></div>
     <div class="shortcut-body">
       <span class="shortcut-label">Reserveren</span>
+      {% if online_reserveren %}
       <h2 class="shortcut-title">Tafel boeken,<br>direct bevestigd</h2>
       <span class="shortcut-link">Reserveer nu →</span>
+      {% else %}
+      <h2 class="shortcut-title">Even bellen,<br>wij dekken de tafel</h2>
+      <span class="shortcut-link">070-514 61 16 →</span>
+      {% endif %}
     </div>
   </a>
 </div>
@@ -763,7 +769,7 @@
         <tr><td>Zondag</td><td>08:00, 16:00</td></tr>
       </table>
       <div class="hours-note"><p><strong>🥯 Keuken sluit om 15:30.</strong> Op nationale feestdagen kunnen de tijden afwijken. Bel ons voor actuele info.</p></div>
-      <a href="/reserveren" class="btn-purple" style="display:inline-block;margin-top:2rem">Tafel reserveren</a>
+      <a href="{{ reserveer_url }}" class="btn-purple" style="display:inline-block;margin-top:2rem">{{ reserveer_label }}</a>
     </div>
     <div class="hours-visual reveal reveal-delay-1">
       <img src="{{ url_for('static', filename='fotos/pexels-marina-gr-109305987-19574245.jpg') }}" alt="Bagel Alley display" loading="lazy">
@@ -822,7 +828,7 @@
       <div class="footer-col">
         <h4>Bezoek</h4>
         <a href="#tijden">Openingstijden</a>
-        <a href="/reserveren">Reserveren</a>
+        <a href="{{ reserveer_url }}">{% if online_reserveren %}Reserveren{% else %}Reserveren: 070-514 61 16{% endif %}</a>
         <a href="#contact">Contact</a>
         <a href="/jobs">Jobs</a>
       </div>
@@ -869,7 +875,7 @@
           <span>📅</span>
           <div>
             <div class="reserveer-banner-tekst">Reserveer een tafel</div>
-            <div class="reserveer-banner-sub">Direct boeken, geen wachttijd</div>
+            <div class="reserveer-banner-sub">{% if online_reserveren %}Direct boeken, geen wachttijd{% else %}Telefonisch via 070-514 61 16{% endif %}</div>
           </div>
         </div>
         <span class="reserveer-banner-arrow">›</span>
@@ -922,6 +928,7 @@ function minimizeChat() {
   document.getElementById("chatContainer").classList.add("verborgen");
   document.getElementById("minimizedBar").classList.add("zichtbaar");
 }
+const ONLINE_RESERVEREN = {{ online_reserveren | tojson }};
 function openChatEnReserveer() { openChat(); setTimeout(() => toonBookingFormulier(), 350); }
 function openChat() {
   document.getElementById("chatContainer").classList.remove("verborgen");
@@ -1096,6 +1103,11 @@ async function verversSlots() {
 
 // ── BOOKING FORMULIER ──
 async function toonBookingFormulier() {
+  if (!ONLINE_RESERVEREN) {
+    document.querySelectorAll(".booking-chat-wrapper").forEach(e => e.remove());
+    await voegBotToe('Reserveren gaat op dit moment telefonisch. Bel ons op <a href="tel:+31705146116" style="color:#8758ce;font-weight:600;text-decoration:none;border-bottom:1px solid #c9a8f0;">070-514 61 16</a>, dan zetten we een tafel voor je klaar. We zijn bereikbaar op ma en wo t/m zo van 08:00 tot 16:00.');
+    return;
+  }
   document.querySelectorAll(".booking-chat-wrapper").forEach(e => e.remove());
   gekozenSlot = null;
   const chatvenster = document.getElementById("chatvenster");

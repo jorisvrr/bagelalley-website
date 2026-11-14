@@ -221,7 +221,7 @@
     <span class="nav-logo-text">Bagel <span>Alley</span></span>
   </a>
   <a href="/" class="nav-back">← Terug naar de website</a>
-  <a href="/reserveren" class="nav-cta">Tafel reserveren</a>
+  <a href="{{ reserveer_url }}" class="nav-cta">{{ reserveer_label }}</a>
 </nav>
 
 <div class="page-hero">
@@ -304,10 +304,10 @@
   <div class="menu-cta-bar">
     <div class="menu-cta-text">
       <div class="cta-title">Klaar om te genieten?</div>
-      <div class="cta-sub">Reserveer een tafel of bestel online via onze webshop.</div>
+      <div class="cta-sub">{% if online_reserveren %}Reserveer een tafel of bestel online via onze webshop.{% else %}Reserveer telefonisch via 070-514 61 16 of bestel online via onze webshop.{% endif %}</div>
     </div>
     <div class="menu-cta-btns">
-      <a href="/reserveren" class="btn-purple">📅 Tafel reserveren</a>
+      <a href="{{ reserveer_url }}" class="btn-purple">📅 {{ reserveer_label }}</a>
       <a href="/shop" class="btn-ghost">🛍️ Online bestellen</a>
     </div>
   </div>

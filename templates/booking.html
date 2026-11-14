@@ -148,8 +148,13 @@
 <!-- HERO STRIP -->
 <div class="booking-hero">
   <span class="booking-hero-label">Wassenaar · Langstraat 42</span>
+  {% if online_reserveren %}
   <h1>Reserveer je tafel<br><em>direct bevestigd.</em></h1>
   <p class="booking-hero-sub">Kies een datum en tijdstip en ontvang direct een bevestiging per e-mail.</p>
+  {% else %}
+  <h1>Reserveer je tafel<br><em>even bellen.</em></h1>
+  <p class="booking-hero-sub">Reserveren gaat op dit moment telefonisch. We zetten graag een tafel voor je klaar.</p>
+  {% endif %}
   <div class="booking-hero-tabs">
     <div class="booking-hero-tab active">📅 Reservering</div>
   </div>
@@ -158,6 +163,7 @@
 <!-- MAIN -->
 <div class="booking-main">
 
+  {% if online_reserveren %}
   <!-- FORM -->
   <div class="booking-card">
     <div class="booking-card-header">
@@ -227,6 +233,21 @@
       <button class="btn-submit" id="submitBtn" onclick="verstuurReservering()">Tafel reserveren</button>
     </div>
   </div>
+  {% else %}
+  <!-- TELEFONISCH RESERVEREN -->
+  <div class="booking-card">
+    <div class="booking-card-header">
+      <h2>Reserveren via de telefoon</h2>
+      <p>Bel ons tijdens openingstijden, dan regelen we het meteen</p>
+    </div>
+    <div class="booking-card-body" style="align-items:flex-start;">
+      <a href="tel:+31705146116" class="btn-submit" style="text-decoration:none;text-align:center;display:block;width:100%;">Bel 070-514 61 16</a>
+      <p style="font-size:.92rem;color:var(--muted);line-height:1.7;">Wij zijn bereikbaar op maandag en woensdag tot en met zondag van 08:00 tot 16:00. Op dinsdag zijn we gesloten.</p>
+      <p style="font-size:.92rem;color:var(--muted);line-height:1.7;">Geef bij het bellen je naam, de datum, het tijdstip en het aantal personen door. Ook voor High Tea, groepen en arrangementen kun je ons bellen.</p>
+      <p style="font-size:.85rem;color:var(--muted);line-height:1.7;">Online reserveren komt binnenkort.</p>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- SIDEBAR -->
   <div class="booking-sidebar">
@@ -283,6 +304,7 @@
   </div>
 </div>
 
+{% if online_reserveren %}
 <script>
 const ALLE_SLOTS = ["08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30","14:00","14:30","15:00","15:30"];
 let gekozenSlot = null;
@@ -384,6 +406,7 @@ async function verstuurReservering() {
 // Laad direct slots voor vandaag
 laadSlots();
 </script>
+{% endif %}
 {% include "_ident.html" ignore missing %}
 {% include "_cookie.html" ignore missing %}
 </body>

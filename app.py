@@ -1,5 +1,5 @@
 # region ── IMPORTS ─────────────────────────────────────────────
-from flask import Flask, render_template, request, jsonify, session, Response
+from flask import Flask, render_template, request, jsonify, session, Response, abort
 import os
 import json
 import re
@@ -8,8 +8,10 @@ import sqlite3
 from datetime import datetime, date
 # endregion
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "bagelalley-secret-change-me")
+# Statische bestanden staan in public/static: Vercel serveert public/ via zijn CDN
+# (Flask's eigen static-map wordt daar genegeerd). Lokaal serveert Flask ze zelf.
+app = Flask(__name__, static_folder="public/static", static_url_path="/static")
+app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)  # geen vaste fallback
 
 # region ── SECURITY: proxy, rate limiting, validatie-helpers ────
 import hmac
@@ -365,10 +367,12 @@ def stuur_newsletter(email: str, naam: str = ""):
     except Exception as e:
         print(f"[NEWSLETTER FOUT] {e}")
 
-# endregion = os.environ.get("SECRET_KEY", "bagelalley-secret-change-me")
+# endregion
 
 # region ── DATABASE SETUP ─────────────────────────────────────
-DB_PATH = "boekingen.db"
+# Op Vercel is alleen /tmp schrijfbaar (en tijdelijk). Online reserveren staat uit,
+# dus dit is alleen nodig zodat de app niet crasht bij het opstarten.
+DB_PATH = "/tmp/boekingen.db" if os.environ.get("VERCEL") else "boekingen.db"
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
@@ -386,7 +390,10 @@ def init_db():
         """)
         conn.commit()
 
-init_db()
+try:
+    init_db()
+except Exception as e:  # database mag de site nooit platleggen
+    print(f"[DB] init mislukt: {e}")
 
 ALLE_SLOTS = [
     "08:00","08:30","09:00","09:30",
@@ -444,6 +451,11 @@ BEDRIJF = {
 # Canonieke domein. Zet desnoods de env var SITE_URL als je een ander
 # (sub)domein gebruikt, bijv. https://bagelalley.up.railway.app
 SITE_URL = os.environ.get("SITE_URL", "https://bagelalley.nl").rstrip("/")
+
+# Online reserveren aan/uit. Standaard UIT: reserveren gaat telefonisch.
+# Weer aanzetten: env var ONLINE_RESERVEREN=1 op Railway (geen codewijziging nodig).
+ONLINE_RESERVEREN = os.environ.get("ONLINE_RESERVEREN", "0").strip().lower() in ("1", "true", "ja", "yes")
+RESERVEER_TEL_LINK = "tel:+31705146116"
 
 # Geo-coordinaten van de zaak — controleer deze in Google Maps en pas
 # ze hier aan als ze niet exact kloppen (rechtsklik op de pin → coordinaten).
@@ -516,6 +528,9 @@ def inject_seo_globals():
     return {
         "site_url": SITE_URL,
         "restaurant_schema_json": schema,
+        "online_reserveren": ONLINE_RESERVEREN,
+        "reserveer_url": "/reserveren" if ONLINE_RESERVEREN else RESERVEER_TEL_LINK,
+        "reserveer_label": "Tafel reserveren" if ONLINE_RESERVEREN else "Bel om te reserveren",
     }
 
 @app.route("/robots.txt")
@@ -523,7 +538,7 @@ def robots_txt():
     body = (
         "User-agent: *\n"
         "Allow: /\n"
-        "Disallow: /admin\n\n"
+        + ("Disallow: /admin\n" if ADMIN_ENABLED else "") + "\n"
         "Sitemap: " + SITE_URL + "/sitemap.xml\n"
     )
     return Response(body, mimetype="text/plain")
@@ -548,6 +563,17 @@ def sitemap_xml():
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
            + items + "</urlset>")
     return Response(xml, mimetype="application/xml")
+
+import base64 as _b64
+_FAVICON_BYTES = _b64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAKMWlDQ1BJQ0MgUHJvZmlsZQAAeJydlndUU9kWh8+9N71QkhCKlNBraFICSA29SJEuKjEJEErAkAAiNkRUcERRkaYIMijggKNDkbEiioUBUbHrBBlE1HFwFBuWSWStGd+8ee/Nm98f935rn73P3Wfvfda6AJD8gwXCTFgJgAyhWBTh58WIjYtnYAcBDPAAA2wA4HCzs0IW+EYCmQJ82IxsmRP4F726DiD5+yrTP4zBAP+flLlZIjEAUJiM5/L42VwZF8k4PVecJbdPyZi2NE3OMErOIlmCMlaTc/IsW3z2mWUPOfMyhDwZy3PO4mXw5Nwn4405Er6MkWAZF+cI+LkyviZjg3RJhkDGb+SxGXxONgAoktwu5nNTZGwtY5IoMoIt43kA4EjJX/DSL1jMzxPLD8XOzFouEiSniBkmXFOGjZMTi+HPz03ni8XMMA43jSPiMdiZGVkc4XIAZs/8WRR5bRmyIjvYODk4MG0tbb4o1H9d/JuS93aWXoR/7hlEH/jD9ld+mQ0AsKZltdn6h21pFQBd6wFQu/2HzWAvAIqyvnUOfXEeunxeUsTiLGcrq9zcXEsBn2spL+jv+p8Of0NffM9Svt3v5WF485M4knQxQ143bmZ6pkTEyM7icPkM5p+H+B8H/nUeFhH8JL6IL5RFRMumTCBMlrVbyBOIBZlChkD4n5r4D8P+pNm5lona+BHQllgCpSEaQH4eACgqESAJe2Qr0O99C8ZHA/nNi9GZmJ37z4L+fVe4TP7IFiR/jmNHRDK4ElHO7Jr8WgI0IABFQAPqQBvoAxPABLbAEbgAD+ADAkEoiARxYDHgghSQAUQgFxSAtaAYlIKtYCeoBnWgETSDNnAYdIFj4DQ4By6By2AE3AFSMA6egCnwCsxAEISFyBAVUod0IEPIHLKFWJAb5AMFQxFQHJQIJUNCSAIVQOugUqgcqobqoWboW+godBq6AA1Dt6BRaBL6FXoHIzAJpsFasBFsBbNgTzgIjoQXwcnwMjgfLoK3wJVwA3wQ7oRPw5fgEVgKP4GnEYAQETqiizARFsJGQpF4JAkRIauQEqQCaUDakB6kH7mKSJGnyFsUBkVFMVBMlAvKHxWF4qKWoVahNqOqUQdQnag+1FXUKGoK9RFNRmuizdHO6AB0LDoZnYsuRlegm9Ad6LPoEfQ4+hUGg6FjjDGOGH9MHCYVswKzGbMb0445hRnGjGGmsVisOtYc64oNxXKwYmwxtgp7EHsSewU7jn2DI+J0cLY4X1w8TogrxFXgWnAncFdwE7gZvBLeEO+MD8Xz8MvxZfhGfA9+CD+OnyEoE4wJroRIQiphLaGS0EY4S7hLeEEkEvWITsRwooC4hlhJPEQ8TxwlviVRSGYkNimBJCFtIe0nnSLdIr0gk8lGZA9yPFlM3kJuJp8h3ye/UaAqWCoEKPAUVivUKHQqXFF4pohXNFT0VFysmK9YoXhEcUjxqRJeyUiJrcRRWqVUo3RU6YbStDJV2UY5VDlDebNyi/IF5UcULMWI4kPhUYoo+yhnKGNUhKpPZVO51HXURupZ6jgNQzOmBdBSaaW0b2iDtCkVioqdSrRKnkqNynEVKR2hG9ED6On0Mvph+nX6O1UtVU9Vvuom1TbVK6qv1eaoeajx1UrU2tVG1N6pM9R91NPUt6l3qd/TQGmYaYRr5Grs0Tir8XQObY7LHO6ckjmH59zWhDXNNCM0V2ju0xzQnNbS1vLTytKq0jqj9VSbru2hnaq9Q/uE9qQOVcdNR6CzQ+ekzmOGCsOTkc6oZPQxpnQ1df11Jbr1uoO6M3rGelF6hXrtevf0Cfos/ST9Hfq9+lMGOgYhBgUGrQa3DfGGLMMUw12G/YavjYyNYow2GHUZPTJWMw4wzjduNb5rQjZxN1lm0mByzRRjyjJNM91tetkMNrM3SzGrMRsyh80dzAXmu82HLdAWThZCiwaLG0wS05OZw2xljlrSLYMtCy27LJ9ZGVjFW22z6rf6aG1vnW7daH3HhmITaFNo02Pzq62ZLde2xvbaXPJc37mr53bPfW5nbse322N3055qH2K/wb7X/oODo4PIoc1h0tHAMdGx1vEGi8YKY21mnXdCO3k5rXY65vTW2cFZ7HzY+RcXpkuaS4vLo3nG8/jzGueNueq5clzrXaVuDLdEt71uUnddd457g/sDD30PnkeTx4SnqWeq50HPZ17WXiKvDq/XbGf2SvYpb8Tbz7vEe9CH4hPlU+1z31fPN9m31XfKz95vhd8pf7R/kP82/xsBWgHcgOaAqUDHwJWBfUGkoAVB1UEPgs2CRcE9IXBIYMj2kLvzDecL53eFgtCA0O2h98KMw5aFfR+OCQ8Lrwl/GGETURDRv4C6YMmClgWvIr0iyyLvRJlESaJ6oxWjE6Kbo1/HeMeUx0hjrWJXxl6K04gTxHXHY+Oj45vipxf6LNy5cDzBPqE44foi40V5iy4s1licvvj4EsUlnCVHEtGJMYktie85oZwGzvTSgKW1S6e4bO4u7hOeB28Hb5Lvyi/nTyS5JpUnPUp2Td6ePJninlKR8lTAFlQLnqf6p9alvk4LTduf9ik9Jr09A5eRmHFUSBGmCfsytTPzMoezzLOKs6TLnJftXDYlChI1ZUPZi7K7xTTZz9SAxESyXjKa45ZTk/MmNzr3SJ5ynjBvYLnZ8k3LJ/J9879egVrBXdFboFuwtmB0pefK+lXQqqWrelfrry5aPb7Gb82BtYS1aWt/KLQuLC98uS5mXU+RVtGaorH1futbixWKRcU3NrhsqNuI2ijYOLhp7qaqTR9LeCUXS61LK0rfb+ZuvviVzVeVX33akrRlsMyhbM9WzFbh1uvb3LcdKFcuzy8f2x6yvXMHY0fJjpc7l+y8UGFXUbeLsEuyS1oZXNldZVC1tep9dUr1SI1XTXutZu2m2te7ebuv7PHY01anVVda926vYO/Ner/6zgajhop9mH05+x42Rjf2f836urlJo6m06cN+4X7pgYgDfc2Ozc0tmi1lrXCrpHXyYMLBy994f9Pdxmyrb6e3lx4ChySHHn+b+O31w0GHe4+wjrR9Z/hdbQe1o6QT6lzeOdWV0iXtjusePhp4tLfHpafje8vv9x/TPVZzXOV42QnCiaITn07mn5w+lXXq6enk02O9S3rvnIk9c60vvG/wbNDZ8+d8z53p9+w/ed71/LELzheOXmRd7LrkcKlzwH6g4wf7HzoGHQY7hxyHui87Xe4Znjd84or7ldNXva+euxZw7dLI/JHh61HXb95IuCG9ybv56Fb6ree3c27P3FlzF3235J7SvYr7mvcbfjT9sV3qID0+6j068GDBgztj3LEnP2X/9H686CH5YcWEzkTzI9tHxyZ9Jy8/Xvh4/EnWk5mnxT8r/1z7zOTZd794/DIwFTs1/lz0/NOvm1+ov9j/0u5l73TY9P1XGa9mXpe8UX9z4C3rbf+7mHcTM7nvse8rP5h+6PkY9PHup4xPn34D94Tz+6TMXDkAAAtuSURBVHicnZdrbF3Vlcd/e+9zzj33Xl/f67cdv2InsZOQhEBCSIjbpITAtEAQiLgjVE0pMKFl+qFVhYoGzbieGapWTNUKVaMSdaatRlApieiAgKJCGJ4BHEjJ088ktmM7fsXX917fx3nu+UBTMlBmOrM/7rW0/v+ttfZa6y/4n4/YywF5kO7g8sV9nT9MRHynI0Q3+TpIARhCLUrEhGPkhv5t8PHcZd+9HFAH6Q4B/ZkAn2XooUf20hsC7GvoiYmIdRtC3yUIt4BoklKaAgmAJiQMQw+pJ3Qo+9DiGe24z++/2Fv4ZKw/i8Be9qqDHAygR+5rNx5UUnzbwFqFBscp4QUuCLQUKkQItNYSrYVCYZoRDEPiC3fYD/WP95/zn4Te8OOY/wuBy477WntWC2X8zBKRHYHwKeTygZCS8rq4SFTEhZBChH6I1iFCgkRp39c6t5DVSwslTGWpaCyKE5ReLwX+13811jvwp0iI/w5+QB2kO9jX3rtLhcbThmHUlpyS7xQd2by+Rla3VFBYdFm4mMXL+wR+gO8HSCEwLAMrblBRV04kajA9lg5nzy+EyUTSCEUw62vvnv3neg5fxvgUgct52tfRu0v5xnNSECsUS4EyUdffvZ70TIbhdyYoLjhIJUEIfNfHjkewbJPADwmDgCAIKKuI0Xp1HSqiOPnySBAxokqasuDr4p795/7x8JU1Ia4Ef6jp+yu1Fb4jhKguFZ3AKJPqxgc2cezFAcaPzpKsTVDRVE6yKk6qIYGMwODbY0wPLRBPRdGEKGWQXyzgl0Lar29gxeYmjhw4HpjaVsJkXjhy279M/O3IZUx5mcTevQeUb3i/UJjVvu/7WoZqz3c+x9H/OMOFo/M0b6xl/e52lhbyTAzMcPK1EebG0nzxb25g+z0bsGIGbRubWH/jCu58dCerbmhitG+agbdH+fxfXauKbsE3tFntG94v9nJAXc6A3EGP6qU3rDg2cH9E2l2e9PzcQt64+RvbGOob5+LpBexyk90PbGPk+Di5mQJu0ccvBJz+3SjP/OgwN95/Pbsfup7Bd8/z+tPH+PCVYW7/zg6MhGRmMM348Wmuu3OtcWkx7dtWvKtixcD9vfSGO+hR8nV6g69seDwu4JFABNrJl+TyaxqoWZ7i6DNnqKgrx3N9ilmXVde2ggCpJEIKopUmN//1dn7Y/a/MjKT58j/tZsNNK4jHIrz887cxpEFZZZyBt8aJJmxqlidlqZDXUuhHvrLh8fjr9AYS0Ha2eKupI22e74VLl5bkdXvW8sELAxhaoXVILBHj2cdfZfDNMSJxCykFxSWHlVuaKWVK5Kc83vjlMV584giFrMvZYxP0Hx5HKoUmxBCKSxfSbLnjKpnLLIURGWuzs8VbAS0BpOBuHYY6nrJ12zVNtKxbxuzoPHa5TSHn4rs+hrJIX1xCh+C7AYVskbaNzYyemqKurZLmtbX4+YDZkQWqmlM0rq+hvDpOMevgeT652QLZ+TzKUlprtNT6bgBxX+fDCdNLnBRatC6/rl7bZbbYfMdq5ibT9B06TVjUCCVIz2Rp6qhncniaVHUSxynxhfu2cPS5U5RXximvT9C+cRkv/PRNbnlwO27J49ThYebOLVLZmGRuYgEdglcItNBKaBGMeWZuvREpJjoCQaM04YPn+8XmW9fiOh7Z2RwrtzSSXFaGCCXp2Qy1LVVs0CsoLpUI3ADf9zh/bArbjrDrgeuwoiat6+q5cHYaUymq2hN07mzFMky00MwMLnD02X4hBeiAxoif6JChqZuUkobWWpuWSefW5Vwaz1BWEWfl5hYCNyBWFqWyvoJioYRlG4RFOHl4mOq6CsyI4qqdbbz32xMf/f1NzZQnY1QtS7Ly2uU4iz5P/d0LpCrLOffhBL4ToNFaKWWEpm4S97c/+lVLxH4Z+H4gpFSGDWbMoJhzERIi0QjVLSnatzVQWZ3iVw8/R/vVrWRncwglqGpMYliKoSPjVLWmCMIAyzAIghDPD4hELQwhaNlYxxtPfUiyqhy0DgzDUI4u3Csvt0MhBW7RJVlbRnlNnOKiC47g0ugimZklZCg5+cYALauXMfL+OPn5Em7Ro3JZOWffnyCasMlOL5GfK3HpQpZS1sVZcpkemMNZcvnwt4NsvWsDKgJa6z8OAWkIa1FrEBJZyrt0bG+lpqOcwA1ACaLlNrVtSU6/co7MhRLX3bWGe75/CyKmWdPVytDRMaSUaDSGZWBYCmVIYlUR7v3n22m8qo7spSJOwWftzjbiVTa+G0g0GMJalNITE0EQ+CCEYUkuDs+TmSxgWgaFTImVW5pYf9NKfv/qIBdOzfHUIy8xfmaK7730DS6en2d2OI0dsxHiD0/SYMctRo9Ncf7EFA0rqwhcH2UqLpycpphxMSxD+H7gS09MSCeaGwImRSixoqa+NLpI7fJK/NAnWmYzfnoaO2pz2ze7aF5Ty8abOpkdyLD/Wwe5/Vs7uXbPGtIzixSzJdySh+u45NIFGlbVUMgVOPXaMGYsQllVHGEIsrN5bVkWoCedaG5IAOxr+4cDEWnfnS/lAqfoGjfu28zvXxqmMFMk0BrLlqzY3ITvhixO58jO5SkuOpTV2+zetw235HKub4KlOYcwDLHiBmWVUcbOTFNccHALPtfe3kEuk+fskSk/WZ5STlg6tP/833dLAMNUh1zHE2u6lotdX91C/5ujdGxtJF5js/uBrfhOyInfnWXo3XEWJnMIJPGqGF5Oc+h7r/D+s/2YtkWiOoZhGxTSJY6/PERZIs71e9aRqIsSrbJZmFhi653rhVNyhWGqQwASEDVXJ1/Utj86P5qVKirDmbNp/FJI3aoUF4dn2f7ljVS3JClL2piWQRAE6ECjLEmqppz0hRwnXj7L4DujTJyZZWpkgcbOOqqbk/S9eIpNd3Ry6vAIrR31YTHtSDdwzkdt64WPx/HBby4ZlvGDS+dzYrJ/Ntx2x9W8e+gkqZpy5i/OMzeWpmVdA81r6slcWiKasPE9D98NKBXdjyZj3EQqiRVTrPv8CrbcsQ7X8Vjd1cbAO6OUJRO0rK8NR96bFJZt/uBHJx7O76BHCUD00CPOcJWobO9/jUB13dC91s9nHOP4a0N0bm1mfiyL5wS4BZdrvrQaJ+tz/D/7icSilCVt3JJLPuPQvLqO5jW1zIwtMjk8TfPaWjKZJbxMwKa/WOMfefqkMTudfutLP1m/83T3ad1Lr5b8QTQcpDtQtvk1rcP5d589Y1QvTwbrblzB2aOTGJaifkUlpq1YnM5x6q1hGjvr2X7nOtZ0LWft59pJ1sZx8iXOHDnHzIVZqltSnHh1GHchoGvvxqDv2TPG/FR2vqIu9bXu7j8upfqKpVTLXkT4UMdju0KH56pbk7EVXQ2BoZV69d8/IBI1qGurQocaw1L4zkfdLPRDECAEIEOklCxligDUt9Tg+W6AhxrumywkqiJ7nuh/9PBlrE+v5XsPqIMHu4OH1jy2y88FT1u2Vdt8TZXfvqFFvvWbY9LNeShTUcw6xKviSEN81MYN0J7Gcz2qGivwHY+NN3WGhYwT9v2m3yhmndmyqug9T/R/97PX8k8Jk3WPrRbZ8Gehw47K1gSLi5ngmls6SaTKxNTQnJifSAvLNImmLIbfv8AXH+jSh3/9nv7CX27RkZjBSN+EGnxzHBWVr5vV8us//eDRgU+C/0kCV5Lo6emRc7+2HnQK3rcjhr0qGjdJNZeRbIhh2RHtlpwwVhZn4P2zctPNa8W7h05hCAONpuQ6w74T/rjhXv/J3t7/gzT7uCY+Fg89m56MzS2mb/M89y6v5G3RhE2GskzLMghCjVSCQqHg2VFrQmv6fD98Zm7q4vPPs///J06vtH9Snj+85+cJ5/xih++UmnzfT0ml0KFYjMTsiYgbDD0++N0/W55rrcV/AZLSmhYfIu7pAAAAAElFTkSuQmCC"
+)
+
+@app.route("/favicon.ico")
+def favicon_ico():
+    # Favicon vanuit de code geserveerd, los van static-bestanden/templates.
+    return Response(_FAVICON_BYTES, mimetype="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
 # endregion
 
 # region ── LINK HULPFUNCTIE ────────────────────────────────────
@@ -572,6 +598,11 @@ KENNISBANK = {
     "parking":        f'In Wassenaar zijn er parkeerplekken in de omgeving van de Langstraat. Bekijk de route {link("hier", "https://maps.google.com/?q=Langstraat+42+Wassenaar")}.',
     "allergieen":     f'Voor vragen over allergenen of dieetwensen neem je contact op via {link("dit formulier", "https://www.bagelalley.nl/contact")} of bel 070-514 61 16.',
     "groepen":        f'Voor groepen of speciale gelegenheden bel je ons op 070-514 61 16 of stuur een bericht via {link("onze contactpagina", "https://www.bagelalley.nl/contact")}.',
+    "dieren":         f'Huisdieren zijn toegestaan binnen en op het terras! Voor meer info over huisdieren, bel 070-514 61 16.',
+    "huisdieren":     f'Huisdieren zijn toegestaan binnen en op het terras! Voor meer info over huisdieren, bel 070-514 61 16.',
+    "jobs":           f'We zijn altijd op zoek naar enthousiast personeel! Bekijk de openstaande vacatures {link("hier", "https://www.bagelalley.nl/jobs")}.',
+    "kinderen":       f'Kinderen zijn van harte welkom! We hebben een kindvriendelijke omgeving! Meer info vind je {link("hier", "https://www.bagelalley.nl")}.',
+    "reserveren":     f'Reserveren kan op dit moment alleen telefonisch, via 070-514 61 16 (tijdens openingstijden).',
 }
 # endregion
 
@@ -579,6 +610,14 @@ KENNISBANK = {
 # Zet API key als omgevingsvariabele: export ANTHROPIC_API_KEY=sk-ant-...
 # Zonder key: fallback naar keyword-matching
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+_RESERVEER_REGEL = (
+    '- Als iemand wil reserveren of een tafel boeken: antwoord NOOIT met een link of telefoonnummer. '
+    'Zeg kortweg: "Reserveer via het formulier hieronder!" - het formulier opent automatisch in de chat.'
+    if ONLINE_RESERVEREN else
+    '- Reserveren kan op dit moment alleen telefonisch, via 070-514 61 16 (tijdens openingstijden). '
+    'Online reserveren is nog niet mogelijk. Als iemand wil reserveren, verwijs vriendelijk naar dat nummer.'
+)
 
 SYSTEM_PROMPT = f"""Je bent Sonja, de eigenares van Bagel Alley in Wassenaar. Je beantwoordt vragen van gasten op een warme, persoonlijke manier.
 
@@ -599,11 +638,11 @@ Regels:
 - Wees warm, informeel en enthousiast — praat als een echte eigenares die haar zaak kent
 - Kort en to-the-point (max 2-3 zinnen)
 - Voeg altijd een klikbare HTML link toe als er een relevante pagina is, gebruik dit format exact:
-  <a href="https://..." target="_blank" style="color:#8758ce;font-weight:600;text-decoration:none;border-bottom:1px solid #c9a8f0;">ankertekst</a>
-  Gebruik ankerteksten zoals "hier", "ons menu", "het formulier" — schrijf NOOIT de URL uit
+<a href="https://..." target="_blank" style="color:#8758ce;font-weight:600;text-decoration:none;border-bottom:1px solid #c9a8f0;">ankertekst</a>
+Gebruik ankerteksten zoals "hier", "ons menu", "het formulier" — schrijf NOOIT de URL uit
 - Als je iets niet weet, verwijs naar 070-514 61 16
 - Geen markdown, geen opsommingstekens — gewone tekst
-- Als iemand wil reserveren of een tafel boeken: antwoord NOOIT met een link of telefoonnummer. Zeg kortweg: "Reserveer via het formulier hieronder! 📅" — het formulier opent automatisch in de chat.
+{_RESERVEER_REGEL}
 """
 # endregion
 
@@ -642,6 +681,10 @@ def reageer_zonder_ai(bericht: str) -> str:
         return KENNISBANK["openingstijden"]
     elif any(w in b for w in ["adres", "locatie", "waar", "vinden", "wassenaar"]):
         return KENNISBANK["adres"]
+    elif any(w in b for w in ["jobs", "vacature", "werken", "baan", "personeel"]):
+        return KENNISBANK["jobs"]
+    elif any(w in b for w in ["dieren", "hond", "kat", "huisdier"]):
+        return KENNISBANK["huisdieren"]
     elif any(w in b for w in ["telefoon", "bellen", "mail", "contact", "bereiken"]):
         return KENNISBANK["contact"]
     elif any(w in b for w in ["high tea", "high-tea", "hightea", "tea"]):
@@ -658,6 +701,8 @@ def reageer_zonder_ai(bericht: str) -> str:
         return KENNISBANK["menu"]
     elif any(w in b for w in ["bagel"]):
         return KENNISBANK["bagels"]
+    elif any(w in b for w in ["reserveren", "reservering", "tafel", "boeking", "boeken"]):
+        return KENNISBANK["reserveren"]
     elif any(w in b for w in ["allergie", "glutenvrij", "vegan", "vegetarisch", "lactose", "dieet"]):
         return KENNISBANK["allergieen"]
     elif any(w in b for w in ["groep", "verjaardag", "feest", "jubileum"]):
@@ -754,6 +799,11 @@ def reserveren_get():
 @app.route("/reserveren", methods=["POST"])
 @limiter.limit("10 per minute")
 def reserveren_post():
+    if not ONLINE_RESERVEREN:
+        return jsonify({
+            "succes": False,
+            "fout": "Online reserveren is op dit moment niet mogelijk. Bel ons op 070-514 61 16.",
+        }), 403
     data = request.get_json(silent=True) or {}
     naam     = _clean_str(data.get("naam"), 100)
     email    = _clean_str(data.get("email"), 150)
@@ -852,10 +902,18 @@ def admin_events():
 # endregion
 
 # region ── ADMIN INSTELLINGEN ───────────────────────────────────
+# GEARCHIVEERD: de admin wordt op dit moment niet gebruikt. Standaard UIT, dan
+# geeft elke /admin-URL een 404 (alsof hij niet bestaat). De code blijft bewaard.
+# Weer aanzetten: env vars ADMIN_ENABLED=1 en ADMIN_PASS=<sterk wachtwoord>.
+ADMIN_ENABLED = os.environ.get("ADMIN_ENABLED", "0").strip().lower() in ("1", "true", "ja", "yes")
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
-# Zet ADMIN_PASS als env var in Railway en roteer het oude wachtwoord:
-# dit zat hardcoded in de broncode en staat dus in de git-historie.
-ADMIN_PASS = os.environ.get("ADMIN_PASS", "bagelalley2024")
+# Geen standaardwachtwoord: zonder ADMIN_PASS kan niemand inloggen.
+ADMIN_PASS = os.environ.get("ADMIN_PASS", "")
+
+@app.before_request
+def _admin_gearchiveerd():
+    if not ADMIN_ENABLED and (request.path == "/admin" or request.path.startswith("/admin/")):
+        abort(404)
 # endregion
 
 # region ── ADMIN ROUTES ──────────────────────────────────────────
@@ -871,7 +929,7 @@ def login_vereist(f):
 
 @app.route("/admin")
 def admin():
-    return render_template("admin.html")
+    return render_template("archief/admin.html")
 
 @app.route("/admin/login", methods=["POST"])
 @limiter.limit("5 per minute")
@@ -879,7 +937,7 @@ def admin_login():
     data = request.get_json(silent=True) or {}
     gebruiker = _clean_str(data.get("gebruiker"), 100)
     wachtwoord = str(data.get("wachtwoord") or "")[:200]
-    if _safe_eq(gebruiker, ADMIN_USER) and _safe_eq(wachtwoord, ADMIN_PASS):
+    if ADMIN_PASS and _safe_eq(gebruiker, ADMIN_USER) and _safe_eq(wachtwoord, ADMIN_PASS):
         session["admin_ingelogd"] = True
         return jsonify({"succes": True})
     return jsonify({"succes": False, "fout": "Onjuiste inloggegevens"}), 401
